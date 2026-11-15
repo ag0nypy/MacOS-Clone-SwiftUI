@@ -10,11 +10,11 @@ on:
 jobs:
   build-ios:
     name: Build MacOSClone
-    runs-on: macos-15
+    runs-on: macos-latest
     timeout-minutes: 45
     env:
       PROJECT_NAME: MacOSClone
-      SCHEME_NAME: MacOSClone
+      TARGET_NAME: MacOSClone
       CODE_SIGNING_ALLOWED: "NO"
       CODE_SIGNING_REQUIRED: "NO"
 
@@ -22,7 +22,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Show Xcode info
+      - name: Show Xcode and SDKs
         shell: bash
         run: |
           set -euxo pipefail
@@ -37,10 +37,10 @@ jobs:
 
           xcodebuild \
             -project "${PROJECT_NAME}.xcodeproj" \
-            -scheme "${SCHEME_NAME}" \
+            -target "${TARGET_NAME}" \
             -configuration Release \
             -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
             -derivedDataPath "$RUNNER_TEMP/DerivedData/sim" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
@@ -69,7 +69,7 @@ jobs:
 
           xcodebuild \
             -project "${PROJECT_NAME}.xcodeproj" \
-            -scheme "${SCHEME_NAME}" \
+            -target "${TARGET_NAME}" \
             -configuration Release \
             -sdk iphoneos \
             -arch arm64 \
@@ -113,7 +113,7 @@ jobs:
           unzip -l "$GITHUB_WORKSPACE/MacOSClone-unsigned.ipa"
           test -f "$GITHUB_WORKSPACE/MacOSClone-unsigned.ipa"
 
-      - name: Upload build artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: MacOSClone-iOS-artifacts
@@ -122,3 +122,4 @@ jobs:
             MacOSClone-unsigned.ipa
           if-no-files-found: error
           retention-days: 7
+          
