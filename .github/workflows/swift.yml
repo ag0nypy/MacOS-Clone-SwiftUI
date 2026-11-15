@@ -10,7 +10,7 @@ on:
 jobs:
   build-ios:
     name: Build MacOSClone
-    runs-on: macos-latest
+    runs-on: macos-15
     timeout-minutes: 45
     env:
       PROJECT_NAME: MacOSClone
@@ -22,9 +22,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select Xcode
+      - name: Show Xcode info
+        shell: bash
         run: |
-          sudo xcode-select -switch /Applications/Xcode.app/Contents/Developer
+          set -euxo pipefail
+          xcode-select -p
+          xcodebuild -version
+          xcodebuild -showsdks | grep -E 'iphoneos|iphonesimulator' || true
 
       - name: Build for iOS Simulator
         shell: bash
@@ -36,7 +40,7 @@ jobs:
             -scheme "${SCHEME_NAME}" \
             -configuration Release \
             -sdk iphonesimulator \
-            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath "$RUNNER_TEMP/DerivedData/sim" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
