@@ -1,22 +1,120 @@
-# This workflow will build a Swift project
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-swift
-
-name: Swift
+name: iOS Build
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
+  workflow_dispatch:
 
 jobs:
-  build:
-
+  build-ios:
+    name: Build MacOSClone
     runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      PROJECT_NAME: MacOSClone
+      SCHEME_NAME: MacOSClone
+      CODE_SIGNING_ALLOWED: "NO"
+      CODE_SIGNING_REQUIRED: "NO"
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Build
-      run: swift build -v
-    - name: Run tests
-      run: swift test -v
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -switch /Applications/Xcode.app/Contents/Developer
+
+      - name: Build for iOS Simulator
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          xcodebuild \
+            -project "${PROJECT_NAME}.xcodeproj" \
+            -scheme "${SCHEME_NAME}" \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData/sim" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+          SIM_APP_PATH="$(find "$RUNNER_TEMP/DerivedData/sim" -path '*Build/Products/Release-iphonesimulator/*.app' -type d | head -n 1)"
+          if [ -z "${SIM_APP_PATH}" ]; then
+            echo "Simulator app was not generated."
+            find "$RUNNER_TEMP/DerivedData/sim" -maxdepth 6 -print || true
+            exit 1
+          fi
+
+          test -d "${SIM_APP_PATH}"
+          test -f "${SIM_APP_PATH}/Info.plist"
+
+          SIM_EXECUTABLE="${SIM_APP_PATH}/$(basename "${SIM_APP_PATH}")"
+          test -x "${SIM_EXECUTABLE}"
+          lipo -info "${SIM_EXECUTABLE}"
+
+          echo "SIM_APP_PATH=${SIM_APP_PATH}" >> "$GITHUB_ENV"
+
+      - name: Build for iOS device
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          xcodebuild \
+            -project "${PROJECT_NAME}.xcodeproj" \
+            -scheme "${SCHEME_NAME}" \
+            -configuration Release \
+            -sdk iphoneos \
+            -arch arm64 \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData/device" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+          DEV_APP_PATH="$(find "$RUNNER_TEMP/DerivedData/device" -path '*Build/Products/Release-iphoneos/*.app' -type d | head -n 1)"
+          if [ -z "${DEV_APP_PATH}" ]; then
+            echo "Device app was not generated."
+            find "$RUNNER_TEMP/DerivedData/device" -maxdepth 6 -print || true
+            exit 1
+          fi
+
+          test -d "${DEV_APP_PATH}"
+          test -f "${DEV_APP_PATH}/Info.plist"
+
+          DEV_EXECUTABLE="${DEV_APP_PATH}/$(basename "${DEV_APP_PATH}")"
+          test -x "${DEV_EXECUTABLE}"
+          lipo -info "${DEV_EXECUTABLE}"
+
+          if ! lipo -info "${DEV_EXECUTABLE}" | grep -q 'arm64'; then
+            echo "Device app binary does not contain arm64."
+            exit 1
+          fi
+
+          echo "DEV_APP_PATH=${DEV_APP_PATH}" >> "$GITHUB_ENV"
+
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          rm -rf "$RUNNER_TEMP/ipa/Payload/MacOSClone.app"
+          cp -R "${DEV_APP_PATH}" "$RUNNER_TEMP/ipa/Payload/MacOSClone.app"
+
+          (cd "$RUNNER_TEMP/ipa" && zip -qr "$GITHUB_WORKSPACE/MacOSClone-unsigned.ipa" Payload)
+
+          unzip -l "$GITHUB_WORKSPACE/MacOSClone-unsigned.ipa"
+          test -f "$GITHUB_WORKSPACE/MacOSClone-unsigned.ipa"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: MacOSClone-iOS-artifacts
+          path: |
+            ${{ env.SIM_APP_PATH }}
+            MacOSClone-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
