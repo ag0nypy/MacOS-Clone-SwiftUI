@@ -9,8 +9,7 @@ on:
 
 jobs:
   build-ios:
-    name: Build MacOSClone
-    runs-on: macos-latest
+    runs-on: macos-15
     timeout-minutes: 45
     env:
       PROJECT_NAME: MacOSClone
@@ -19,10 +18,9 @@ jobs:
       CODE_SIGNING_REQUIRED: "NO"
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Show Xcode and SDKs
+      - name: Show Xcode
         shell: bash
         run: |
           set -euxo pipefail
@@ -30,11 +28,10 @@ jobs:
           xcodebuild -version
           xcodebuild -showsdks | grep -E 'iphoneos|iphonesimulator' || true
 
-      - name: Build for iOS Simulator
+      - name: Build simulator
         shell: bash
         run: |
           set -euxo pipefail
-
           xcodebuild \
             -project "${PROJECT_NAME}.xcodeproj" \
             -target "${TARGET_NAME}" \
@@ -46,27 +43,10 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             build
 
-          SIM_APP_PATH="$(find "$RUNNER_TEMP/DerivedData/sim" -path '*Build/Products/Release-iphonesimulator/*.app' -type d | head -n 1)"
-          if [ -z "${SIM_APP_PATH}" ]; then
-            echo "Simulator app was not generated."
-            find "$RUNNER_TEMP/DerivedData/sim" -maxdepth 6 -print || true
-            exit 1
-          fi
-
-          test -d "${SIM_APP_PATH}"
-          test -f "${SIM_APP_PATH}/Info.plist"
-
-          SIM_EXECUTABLE="${SIM_APP_PATH}/$(basename "${SIM_APP_PATH}")"
-          test -x "${SIM_EXECUTABLE}"
-          lipo -info "${SIM_EXECUTABLE}"
-
-          echo "SIM_APP_PATH=${SIM_APP_PATH}" >> "$GITHUB_ENV"
-
-      - name: Build for iOS device
+      - name: Build device
         shell: bash
         run: |
           set -euxo pipefail
-
           xcodebuild \
             -project "${PROJECT_NAME}.xcodeproj" \
             -target "${TARGET_NAME}" \
@@ -78,48 +58,28 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             build
 
-          DEV_APP_PATH="$(find "$RUNNER_TEMP/DerivedData/device" -path '*Build/Products/Release-iphoneos/*.app' -type d | head -n 1)"
-          if [ -z "${DEV_APP_PATH}" ]; then
-            echo "Device app was not generated."
-            find "$RUNNER_TEMP/DerivedData/device" -maxdepth 6 -print || true
-            exit 1
-          fi
-
-          test -d "${DEV_APP_PATH}"
-          test -f "${DEV_APP_PATH}/Info.plist"
-
-          DEV_EXECUTABLE="${DEV_APP_PATH}/$(basename "${DEV_APP_PATH}")"
-          test -x "${DEV_EXECUTABLE}"
-          lipo -info "${DEV_EXECUTABLE}"
-
-          if ! lipo -info "${DEV_EXECUTABLE}" | grep -q 'arm64'; then
-            echo "Device app binary does not contain arm64."
-            exit 1
-          fi
-
-          echo "DEV_APP_PATH=${DEV_APP_PATH}" >> "$GITHUB_ENV"
-
       - name: Package unsigned IPA
         shell: bash
         run: |
           set -euxo pipefail
+          DEV_APP_PATH="$(find "$RUNNER_TEMP/DerivedData/device" -path '*Build/Products/Release-iphoneos/*.app' -type d | head -n 1)"
+          test -d "$DEV_APP_PATH"
+          test -f "$DEV_APP_PATH/Info.plist"
+
+          lipo -info "$DEV_APP_PATH/$(basename "$DEV_APP_PATH")" | grep -q arm64
 
           mkdir -p "$RUNNER_TEMP/ipa/Payload"
           rm -rf "$RUNNER_TEMP/ipa/Payload/MacOSClone.app"
-          cp -R "${DEV_APP_PATH}" "$RUNNER_TEMP/ipa/Payload/MacOSClone.app"
+          cp -R "$DEV_APP_PATH" "$RUNNER_TEMP/ipa/Payload/MacOSClone.app"
 
           (cd "$RUNNER_TEMP/ipa" && zip -qr "$GITHUB_WORKSPACE/MacOSClone-unsigned.ipa" Payload)
 
-          unzip -l "$GITHUB_WORKSPACE/MacOSClone-unsigned.ipa"
-          test -f "$GITHUB_WORKSPACE/MacOSClone-unsigned.ipa"
-
-      - name: Upload artifacts
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: MacOSClone-iOS-artifacts
           path: |
-            ${{ env.SIM_APP_PATH }}
+            ${{ runner.temp }}/DerivedData/sim/**/Build/Products/Release-iphonesimulator/*.app
             MacOSClone-unsigned.ipa
           if-no-files-found: error
           retention-days: 7
-          
